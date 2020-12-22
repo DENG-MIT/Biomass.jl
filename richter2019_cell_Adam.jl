@@ -9,7 +9,7 @@ using Flux.Losses: mae, mse
 using BSON: @save, @load
 using DelimitedFiles
 
-is_restart = false
+is_restart = true
 n_epoch = 100000;
 n_plot = 100;
 opt = ADAMW(0.001, (0.9, 0.999), 1.f-6);
@@ -56,19 +56,38 @@ function getsampletemp(t, T0, beta)
     return T
 end
 
+# [Ea1-3, logA1-3, v3, T0, beta]
+# Ea = [243, 198, 153]  # kJ/mol   # 150
+# logA = [19.5, 14.1, 9.69]  # 15
+# v = 0.35  # R3
+
+u0 = Float64[1.0, 0.0, 0.0];
+slope = Float64[0.1, 0.1];
+Ea = ones(Float64, 3) * 150.f0 ./ slope[1] / 2000;
+logA = ones(Float64, 3) * 15.f0 ./ slope[2] / 200;
+b = ones(Float64, 3)
+v = 0.5f0;
+p = vcat(Ea, logA, b, v, slope);
+
+i_Ea = 1:length(Ea);
+i_logA = i_Ea[end] + 1:i_Ea[end] + length(logA);
+i_b = i_logA[end] + 1:i_logA[end] + length(b);
+i_v = i_b[end] + 1:i_b[end] + length(v);
+i_slope = i_v[end] + 1:i_v[end] + length(slope);
+
 function p2vec(p)
     # [Ea1-3, logA1-3, v3, T0, beta, i_exp]
 
-    slope = p[11:12]
+    slope = p[i_slope]
 
-    Ea = abs.(@view(p[1:3]) .* slope[1]  .* 2000)   # kJ/mol
-    logA = @view(p[4:6]) .* slope[2] .* 200
-    b = @view(p[7:9])
-    v = clamp.(p[10], 0, 1)
+    Ea = @. abs(@view(p[i_Ea]) * slope[1]  * 2000)   # kJ/mol
+    logA = @. @view(p[i_logA]) * slope[2] * 200
+    b = @view(p[i_b])
+    v = clamp.(p[i_v], 0, 1)
 
-    Ea .= clamp.(Ea, 0, 300)
-    logA .= clamp.(logA, -23, 23)
-    b .= clamp.(b, -2, 2)
+    @. Ea = clamp(Ea, 0, 300)
+    @. logA = clamp(logA, -23, 23)
+    @. b = clamp(b, -2, 2)
 
     return Ea, logA, b, v, slope
 end
@@ -115,7 +134,7 @@ function richter2019!(du, u, p, t)
 
     du[1] = - w1
     du[2] = w1 - (w2 + w3)
-    du[3] = w3 * v
+    du[3] = w3 * v[1]
 
     # @show k, du
 end
@@ -141,19 +160,6 @@ for (i_exp, value) in enumerate(l_exp)
     l_exp_info[i_exp, 1] = T0;
 end
 l_exp_info[:, 2] = readdlm("exp_data/beta.txt")[l_exp];
-
-# [Ea1-3, logA1-3, v3, T0, beta]
-# Ea = [243, 198, 153]  # kJ/mol   # 150
-# logA = [19.5, 14.1, 9.69]  # 15
-# v = 0.35  # R3
-
-u0 = Float64[1.0, 0.0, 0.0];
-slope = Float64[0.1, 0.1];
-Ea = ones(Float64, 3) * 150.f0 ./ slope[1] / 2000;
-b = ones(Float64, 3)
-logA = ones(Float64, 3) * 15.f0 ./ slope[2] / 200;
-v = 0.5f0;
-p = vcat(Ea, logA, b, v, slope);
 
 function makeprob(i_exp, p)
     exp_data = l_exp_data[i_exp];
@@ -304,7 +310,7 @@ epochs = ProgressBar(iter:n_epoch);
 loss_epoch = zeros(Float64, n_exp);
 grad_norm = zeros(Float64, n_exp);
 
-# opt = ADAMW(0.001, (0.9, 0.999), 1.f-6);
+opt = ADAMW(0.0001, (0.9, 0.999), 1.f-6);
 
 for epoch in epochs
     global p
