@@ -9,19 +9,19 @@ using Flux.Losses: mae, mse
 using BSON: @save, @load
 using DelimitedFiles
 
-is_restart = false
+is_restart = true
 n_epoch = 100000;
-n_plot = 20;
-# opt = ADAMW(0.001, (0.9, 0.999), 1.f-6);
-opt = RADAM(0.002, (0.9, 0.999))
+n_plot = 10;
+opt = ADAMW(0.001, (0.9, 0.999), 1.f-6);
+# opt = RADAM(0.002, (0.9, 0.999))
 
-ns = 5;
-nr = 4;
+ns = 6;
+nr = 6;
 
 u0 = zeros(ns);
 u0[1] = 1.0
 
-lb = 1.e-5;
+lb = 1.e-6;
 ub = 1.e1;
 
 l_exp = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
@@ -96,11 +96,23 @@ p[nr * (ns + 2) + 1] = 0.1;
 function p2vec(p)
     slope = p[nr * (ns + 2) + 1] .* 1.f2;
     w_b = p[1:nr] .* slope;
+    w_b = clamp.(w_b, -23, 50);
+
     w_out = reshape(p[nr + 1:nr * (ns + 1)], ns, nr);
 
-    w_out[1, :] .= - abs.(w_out[1, :])
+    @. w_out[1, :] = clamp(w_out[1, :], -3, 0)
+    @. w_out[end - 1:end, :] = clamp(abs(w_out[end - 1:end, :]), 0, 3)
+
+    i = 1
+    for j = 1:ns - 2
+        w_out[j, i] = -1.0
+        i = i + 1
+    end
+
+    w_out[ns - 2:ns - 2, :] .= -sum(w_out[1:ns - 3, :], dims=1) .- sum(w_out[ns - 1:ns, :], dims=1)
 
     w_in_Ea = abs.(p[nr * (ns + 1) + 1:nr * (ns + 2)] .* slope .* 10.f0);
+    w_in_Ea = clamp.(w_in_Ea, 0.f0, 300.f0);
 
     w_in = clamp.(-w_out, 0.f0, 4.f0);
     w_in = vcat(w_in, w_in_Ea');
@@ -170,10 +182,17 @@ function cost_singleexp(prob, exp_data)
     sol = solve(prob, alg=ode_solver,
                 saveat=exp_data[:, 1],
                 maxiters=100000, verbose=false);
+    
+    pred = Array(sol)
+
     # masslist = clamp.(sum(sol, dims=1)', -ub, ub);
-    masslist = sum(clamp.(sol, -ub, ub), dims=1)';
+    masslist = sum(clamp.(pred[1:end - 1, :], -ub, ub), dims=1)';
+    gaslist = clamp.(pred[end, :], -ub, ub);
 
     loss = mae(masslist, exp_data[1:length(masslist), 3])
+    gasloss = mae(gaslist, 1 .- exp_data[1:length(masslist), 3])
+
+    loss += gasloss
 
     if sol.retcode == :Success
         nothing
@@ -204,10 +223,10 @@ function plot_sol(sol, exp_data, Tlist, cap, sol0=nothing)
     
     plt = plot(exp_data[:, 1] / 60, exp_data[:, 3], seriestype=:scatter, label="exp");
 
-    plot!(plt, sol.t / 60, sum(sol, dims=1)', lw=2, label="model", legend=:bottomleft);
+    plot!(plt, sol.t / 60, sum(sol[1:end - 1, :], dims=1)', lw=2, label="model", legend=:bottomleft);
     
     if sol0 !== nothing
-        plot!(plt, sol0.t / 60, sum(sol0, dims=1)', label="initial model");
+        plot!(plt, sol0.t / 60, sum(sol0[1:end - 1, :], dims=1)', label="initial model");
     end
     
     xlabel!(plt, "time [min]");
@@ -220,7 +239,7 @@ function plot_sol(sol, exp_data, Tlist, cap, sol0=nothing)
 
     p2 = plot(sol.t / 60, sol[1, :], label="cell", legend=:bottomleft)
     plot!(p2, sol.t / 60, sol[2, :], label="cella")
-    plot!(p2, sol.t / 60, sol[3, :], label="char")
+    plot!(p2, sol.t / 60, sol[end, :], label="gas")
     xlabel!(p2, "time [min]");
     ylabel!(p2, "mass");
 
@@ -279,8 +298,8 @@ cb = function (p, loss_mean, g_norm)
 
     if iter % n_plot == 0
         display_p(p)
-
         list_exp = randperm(n_exp)[1]
+        println("min loss ", minimum(list_loss))
         println("update plot for ", l_exp[list_exp])
         for i_exp in list_exp
             cbi(p, i_exp)
@@ -307,11 +326,12 @@ epochs = ProgressBar(iter:n_epoch);
 loss_epoch = zeros(Float64, n_exp);
 grad_norm = zeros(Float64, n_exp);
 
+opt = ADAMW(0.0001, (0.9, 0.999), 1.f-6);
+
 for epoch in epochs
     global p
     for i_exp in randperm(n_exp)
         # Zygote forward mode AD
-        loss_epoch[i_exp] = loss_neuralode(p, i_exp)
         grad = gradient(p) do x
             Zygote.forwarddiff(x) do x
                 loss_neuralode(x, i_exp)
@@ -324,7 +344,14 @@ for epoch in epochs
         grad = grad ./ grad_norm[i_exp] .* 1.e2
         update!(opt, p, grad)
     end
+    for i_exp in randperm(n_exp)
+        loss_epoch[i_exp] = loss_neuralode(p, i_exp)
+    end
     loss_mean = mean(loss_epoch)
     set_description(epochs, string(@sprintf("Loss: %.4e grad: %.2e", loss_mean, mean(grad_norm))))
     cb(p, loss_mean, mean(grad_norm))
+end
+
+for i_exp in randperm(n_exp)
+    cbi(p, i_exp)
 end
