@@ -10,7 +10,7 @@ using Flux.Losses: mae, mse
 using BSON: @save, @load
 using DelimitedFiles
 
-is_restart = false
+is_restart = true
 n_epoch = 100000;
 n_plot = 10;
 opt = ADAMW(0.001, (0.9, 0.999), 1.f-6);
@@ -259,26 +259,8 @@ if is_restart
     # opt = ADAMW(0.0001, (0.9, 0.999), 1.f-6);
 end
 
-epochs = ProgressBar(iter:n_epoch);
 loss_epoch = zeros(Float64, n_exp);
 grad_norm = zeros(Float64, n_exp);
-
-for epoch in epochs
-    global p
-    for i_exp in randperm(n_exp)
-        grad = ForwardDiff.gradient(x -> loss_neuralode(x, i_exp), p);
-        grad_norm[i_exp] = norm(grad, 2)
-        grad = grad ./ grad_norm[i_exp] .* 1.e2
-        update!(opt, p, grad)
-    end
-    for i_exp in randperm(n_exp)
-        loss_epoch[i_exp] = loss_neuralode(p, i_exp)
-    end
-    loss_mean = mean(loss_epoch)
-    grad_mean = mean(grad_norm)
-    set_description(epochs, string(@sprintf("Loss: %.4e grad: %.2e", loss_mean, grad_mean)))
-    cb(p, loss_mean, grad_mean)
-end
 
 for i_exp in randperm(n_exp)
     cbi(p, i_exp)

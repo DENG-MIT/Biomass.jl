@@ -13,18 +13,19 @@ using DelimitedFiles
 is_restart = false
 n_epoch = 100000;
 n_plot = 10;
-opt = ADAMW(0.001, (0.9, 0.999), 1.f-6);
+opt = ADAMW(0.01, (0.9, 0.999), 1.f-6);
 
-ns = 6;
-nr = 6;
+ns = 7;
+nr = 7;
 
 u0 = zeros(ns);
 u0[1] = 1.0
 
 lb = 1.e-4;
+llb = 1e-8;
 ub = 1.e1;
 
-l_exp = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+l_exp = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14];
 n_exp = length(l_exp)
 i_exp = 1;
 
@@ -39,7 +40,7 @@ function load_exp(filename)
 end
 
 l_exp_data = [];
-l_exp_info = zeros(Float64, length(l_exp), 2);
+l_exp_info = zeros(Float64, length(l_exp), 3);
 for (i_exp, value) in enumerate(l_exp)
     filename = string("exp_data/expdata_no", string(value), ".txt");
     exp_data = load_exp(filename);
@@ -59,9 +60,9 @@ for (i_exp, value) in enumerate(l_exp)
     l_exp_info[i_exp, 1] = T0;
 end
 l_exp_info[:, 2] = readdlm("exp_data/beta.txt")[l_exp];
+l_exp_info[:, 3] = readdlm("exp_data/ocen.txt")[l_exp];
 
 function getsampletemp(t, T0, beta)
-
     if beta < 100
         T = T0 + beta / 60 * t  # K/min to K/s
     else
@@ -79,7 +80,7 @@ function getsampletemp(t, T0, beta)
     return T
 end
 
-p = randn(Float32, nr * (ns + 2) + 1) .* 1.f-2;
+p = randn(Float64, nr * (ns + 2) + 1) .* 1.f-2;
 p[1:nr] .+= 0.8;
 p[nr * (ns + 1) + 1:nr * (ns + 2)] .+= 0.8;
 p[nr * (ns + 2) + 1] = 0.1;
@@ -92,10 +93,11 @@ function p2vec(p)
     w_out = reshape(p[nr + 1:nr * (ns + 1)], ns, nr);
 
     @. w_out[1, :] = clamp(w_out[1, :], -3, 0)
+    @. w_out[2, :] = clamp(w_out[2, :], -3, 0)
     @. w_out[end - 1:end, :] = clamp(abs(w_out[end - 1:end, :]), 0, 3)
 
     i = 1
-    for j = 1:ns - 2
+    for j in 1:ns - 2
         w_out[j, i] = -1.0
         i = i + 1
     end
@@ -107,6 +109,8 @@ function p2vec(p)
 
     w_in = clamp.(-w_out, 0.f0, 4.f0);
     w_in = vcat(w_in, w_in_Ea');
+
+    @. w_out[2, :] = 0
     
     return w_in, w_b, w_out
 end
@@ -129,6 +133,7 @@ display_p(p)
 R = 8.314f-3  # universal gas constant, kJ/mol*K
 function crnn!(du, u, p, t)
     logX = @. log(clamp(u, lb, ub));
+    logX[2] = log(ocen + llb)
     T = getsampletemp(t, T0, beta)
     w_in_x = w_in' * vcat(logX, -1.f0 / R / T);
     du .= w_out * (@. exp(w_in_x + w_b));
@@ -149,11 +154,13 @@ function cost_singleexp(prob, exp_data)
                 sensalg=sense, verbose=false, maxiters=10000);
     pred = Array(sol)
 
-    masslist = sum(clamp.(pred[1:end - 1, :], 0, ub), dims=1)';
-    gaslist = clamp.(pred[end, :], 0, ub);
+    masslist = sum(clamp.(pred[1:end - 1, :], -ub, ub), dims=1)';
+    gaslist = clamp.(pred[end, :], -ub, ub);
 
     loss = mae(masslist, exp_data[1:length(masslist), 3])
-    loss += mae(gaslist, 1 .- exp_data[1:length(masslist), 3])
+    if ocen < lb
+        loss += mae(gaslist, 1 .- exp_data[1:length(masslist), 3])
+    end
 
     if sol.retcode == :Success
         nothing
@@ -164,7 +171,7 @@ function cost_singleexp(prob, exp_data)
 end
 
 function loss_neuralode(p, i_exp)
-    global T0, beta = l_exp_info[i_exp, :];
+    global T0, beta, ocen = l_exp_info[i_exp, :];
     global w_in, w_b, w_out = p2vec(p);
     prob, tlist = makeprob(i_exp, p);
     exp_data = l_exp_data[i_exp];
@@ -208,7 +215,7 @@ function plot_sol(sol, exp_data, Tlist, cap, sol0=nothing)
 end
 
 cbi = function (p, i_exp)
-    global T0, beta = l_exp_info[i_exp, :];
+    global T0, beta, ocen = l_exp_info[i_exp, :];
     global w_in, w_b, w_out = p2vec(p);
     prob, tlist = makeprob(i_exp, p);
     sol = solve(prob, alg=ode_solver, reltol=1e-3, abstol=1e-6, saveat=tlist);
@@ -268,7 +275,9 @@ for epoch in epochs
     for i_exp in randperm(n_exp)
         grad = ForwardDiff.gradient(x -> loss_neuralode(x, i_exp), p);
         grad_norm[i_exp] = norm(grad, 2)
-        grad = grad ./ grad_norm[i_exp] .* 1.e2
+        if grad_norm[i_exp] > 1.e2
+            grad = grad ./ grad_norm[i_exp] .* 1.e2
+        end
         update!(opt, p, grad)
     end
     for i_exp in randperm(n_exp)
@@ -280,6 +289,7 @@ for epoch in epochs
     cb(p, loss_mean, grad_mean)
 end
 
+#= 
 for i_exp in randperm(n_exp)
     cbi(p, i_exp)
-end
+end =#

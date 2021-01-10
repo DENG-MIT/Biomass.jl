@@ -1,2 +1,3 @@
 # Biomass.jl
-Modeling Biomass Pyrolysis in Julia
+
+Modeling Biomass Pyrolysis Kinetic using CRNN
