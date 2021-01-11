@@ -13,19 +13,22 @@ using DelimitedFiles
 is_restart = false
 n_epoch = 100000;
 n_plot = 10;
-opt = ADAMW(0.01, (0.9, 0.999), 1.f-6);
+opt = ADAMW(0.005, (0.9, 0.999), 1.f-5);
+grad_max = 1.f2;
 
-ns = 7;
-nr = 7;
+ns = 6;
+nr = 8;
 
 u0 = zeros(ns);
 u0[1] = 1.0
 
 lb = 1.e-4;
-llb = 1e-8;
+llb = 1e-12;
 ub = 1.e1;
 
-l_exp = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14];
+# l_exp = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14];
+# l_exp = [8, 9, 10, 11, 12, 13];
+l_exp = 1:14
 n_exp = length(l_exp)
 i_exp = 1;
 
@@ -45,13 +48,13 @@ for (i_exp, value) in enumerate(l_exp)
     filename = string("exp_data/expdata_no", string(value), ".txt");
     exp_data = load_exp(filename);
 
-    if i_exp == 4
+    if value == 4
         exp_data = exp_data[1:60, :]
-    elseif i_exp == 5
+    elseif value == 5
         exp_data = exp_data[1:58, :]
-    elseif i_exp == 6
+    elseif value == 6
         exp_data = exp_data[1:60, :]
-    elseif i_exp == 7
+    elseif value == 7
         exp_data = exp_data[1:71, :]
     end
 
@@ -60,7 +63,7 @@ for (i_exp, value) in enumerate(l_exp)
     l_exp_info[i_exp, 1] = T0;
 end
 l_exp_info[:, 2] = readdlm("exp_data/beta.txt")[l_exp];
-l_exp_info[:, 3] = readdlm("exp_data/ocen.txt")[l_exp];
+l_exp_info[:, 3] = log.(readdlm("exp_data/ocen.txt")[l_exp] .+ llb);
 
 function getsampletemp(t, T0, beta)
     if beta < 100
@@ -80,37 +83,40 @@ function getsampletemp(t, T0, beta)
     return T
 end
 
-p = randn(Float64, nr * (ns + 2) + 1) .* 1.f-2;
+np = nr * (ns + 3) + 1
+p = randn(Float64, np) .* 1.f-2;
 p[1:nr] .+= 0.8;
 p[nr * (ns + 1) + 1:nr * (ns + 2)] .+= 0.8;
-p[nr * (ns + 2) + 1] = 0.1;
+p[nr * (ns + 2) + 1:nr * (ns + 3)] .+= 0.1;
+p[nr * (ns + 3) + 1] = 0.1;
+
 
 function p2vec(p)
-    slope = p[nr * (ns + 2) + 1] .* 1.f2;
+    slope = p[nr * (ns + 3) + 1] .* 1.f2;
     w_b = p[1:nr] .* slope;
-    w_b = clamp.(w_b, -23, 50);
+    w_b = clamp.(w_b, 0, 50);
 
     w_out = reshape(p[nr + 1:nr * (ns + 1)], ns, nr);
 
     @. w_out[1, :] = clamp(w_out[1, :], -3, 0)
-    @. w_out[2, :] = clamp(w_out[2, :], -3, 0)
-    @. w_out[end - 1:end, :] = clamp(abs(w_out[end - 1:end, :]), 0, 3)
+    @. w_out[end, :] = clamp(abs(w_out[end, :]), 0, 3)
 
     i = 1
     for j in 1:ns - 2
         w_out[j, i] = -1.0
         i = i + 1
     end
-
     w_out[ns - 1:ns - 1, :] .= -sum(w_out[1:ns - 2, :], dims=1) .- sum(w_out[ns:ns, :], dims=1)
 
     w_in_Ea = abs.(p[nr * (ns + 1) + 1:nr * (ns + 2)] .* slope .* 10.f0);
     w_in_Ea = clamp.(w_in_Ea, 0.f0, 300.f0);
 
-    w_in = clamp.(-w_out, 0.f0, 4.f0);
-    w_in = vcat(w_in, w_in_Ea');
+    w_in_ocen = abs.(p[nr * (ns + 2) + 1:nr * (ns + 3)]);
+    w_in_ocen = clamp.(w_in_ocen, 0.f0, 1.5);
+    w_in_ocen[1:ns] .= 0;
 
-    @. w_out[2, :] = 0
+    w_in = clamp.(-w_out, 0.f0, 4.f0);
+    w_in = vcat(w_in, w_in_Ea', w_in_ocen');
     
     return w_in, w_b, w_out
 end
@@ -130,12 +136,11 @@ function display_p(p)
 end
 display_p(p)
 
-R = 8.314f-3  # universal gas constant, kJ/mol*K
+R = -1.f0 / 8.314f-3  # universal gas constant, kJ/mol*K
 function crnn!(du, u, p, t)
     logX = @. log(clamp(u, lb, ub));
-    logX[2] = log(ocen + llb)
     T = getsampletemp(t, T0, beta)
-    w_in_x = w_in' * vcat(logX, -1.f0 / R / T);
+    w_in_x = w_in' * vcat(logX, R / T, ocen);
     du .= w_out * (@. exp(w_in_x + w_b));
 end
 
@@ -158,7 +163,7 @@ function cost_singleexp(prob, exp_data)
     gaslist = clamp.(pred[end, :], -ub, ub);
 
     loss = mae(masslist, exp_data[1:length(masslist), 3])
-    if ocen < lb
+    if ocen < 1000
         loss += mae(gaslist, 1 .- exp_data[1:length(masslist), 3])
     end
 
@@ -263,7 +268,7 @@ end
 if is_restart
     @load "./checkpoint/mymodel.bson" p opt list_loss list_grad iter
     iter += 1
-    # opt = ADAMW(0.0001, (0.9, 0.999), 1.f-6);
+    # opt = ADAMW(0.001, (0.9, 0.999), 1.f-6);
 end
 
 epochs = ProgressBar(iter:n_epoch);
@@ -275,8 +280,8 @@ for epoch in epochs
     for i_exp in randperm(n_exp)
         grad = ForwardDiff.gradient(x -> loss_neuralode(x, i_exp), p);
         grad_norm[i_exp] = norm(grad, 2)
-        if grad_norm[i_exp] > 1.e2
-            grad = grad ./ grad_norm[i_exp] .* 1.e2
+        if grad_norm[i_exp] > grad_max
+            grad = grad ./ grad_norm[i_exp] .* grad_max
         end
         update!(opt, p, grad)
     end
@@ -289,7 +294,41 @@ for epoch in epochs
     cb(p, loss_mean, grad_mean)
 end
 
-#= 
 for i_exp in randperm(n_exp)
     cbi(p, i_exp)
-end =#
+end
+
+# # BFGS
+# function f(p)
+#     loss = 0
+#     for i_exp in 1:n_exp
+#         loss += loss_neuralode(p, i_exp)
+#     end
+#     return loss / n_exp
+# end
+
+# function g!(G, p)
+#     G .= ForwardDiff.gradient(x -> f(x), p);
+# end
+
+# G = zeros(size(p));
+# loss = f(p)
+# g!(G, p);
+# grad_norm = norm(G, 2)
+# println("bfgs initial loss $loss grad $grad_norm")
+
+# pp = p;
+# for ii in 1:10
+#     res = optimize(f, g!, pp,
+#                     BFGS(),
+#                     Optim.Options(g_tol=1e-12, iterations=50,
+#                                   store_trace=true, show_trace=true))
+#     pp = res.minimizer
+#     loss = f(pp)
+#     g!(G, pp)
+#     grad_norm = norm(G, 2)
+#     println("bfgs iter $ii loss $loss grad $grad_norm")
+#     for i_exp in randperm(n_exp)
+#         cbi(pp, i_exp)
+#     end
+# end
