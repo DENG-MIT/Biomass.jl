@@ -11,17 +11,19 @@ using BSON: @save, @load
 using DelimitedFiles
 
 is_restart = false
-n_epoch = 5000;
-n_plot = 10;
-opt = Flux.Optimiser(ExpDecay(5e-3, 0.2, 500 * 10, 1e-8), ADAMW(0.005, (0.9, 0.999), 1.f-8));
+n_epoch = 4000;
+n_plot = 20;
+# opt = ADAMW(0.005, (0.9, 0.999), 1.f-5);
+opt = Flux.Optimiser(ExpDecay(5e-3, 0.2, 1000 * 10, 1e-5), 
+                     ADAMW(0.005, (0.9, 0.999), 1.f-6));
 grad_max = 1.f1;
 maxiters = 10000;
 
 ns = 5;
-nr = 10;
+nr = 5;
 
 lb = 1.e-6;
-llb = 1.e-6;
+llb = 1e-6;
 rb = 1e-3;
 ub = 1.e1;
 
@@ -43,7 +45,9 @@ for i in 1:n_exp
     end
 end
 
+# ode_solver = AutoTsit5(KenCarp4(autodiff=false));
 ode_solver = AutoTsit5(Rosenbrock23(autodiff=false));
+# ode_solver = KenCarp4(autodiff=false);
 
 function load_exp(filename)
     exp_data = readdlm(filename)  # [t, T, m]
@@ -54,10 +58,10 @@ function load_exp(filename)
 end
 
 l_exp_data = [];
-l_exp_info = zeros(Float64, length(l_exp), 3);
+l_exp_info = zeros(Float32, length(l_exp), 3);
 for (i_exp, value) in enumerate(l_exp)
     filename = string("exp_data/expdata_no", string(value), ".txt");
-    exp_data = Float64.(load_exp(filename));
+    exp_data = Float32.(load_exp(filename));
 
     if value == 4
         exp_data = exp_data[1:60, :]
@@ -76,52 +80,61 @@ end
 l_exp_info[:, 2] = readdlm("exp_data/beta.txt")[l_exp];
 l_exp_info[:, 3] = log.(readdlm("exp_data/ocen.txt")[l_exp] .+ llb);
 
-np = nr * (ns + 4) + 1
-p = randn(Float64, np) .* 1.f-2;
-p[1:nr] .+= 0.8;  # w_b
-p[nr * (ns + 1) + 1:nr * (ns + 2)] .+= 0.8;  # w_out
-p[nr * (ns + 2) + 1:nr * (ns + 4)] .+= 0.1;  # w_Ea
-p[end] = 0.1;  # slope
+np = nr * (ns * 2 + 3) + 1
+p = randn(Float32, np) .* 1.f-2;
+p[1:nr] .+= 0.8;
+p[nr * (ns * 2 + 1) + 1:nr * (ns * 2 + 2)] .+= 0.8;
+p[nr * (ns * 2 + 2) + 1:nr * (ns * 2 + 3)] .+= 0.1;
+p[nr * (ns * 2 + 3) + 1] = 0.1;
+
 
 function p2vec(p)
-    slope = p[end] .* 1.f2;
+    slope = p[nr * (ns + 3) + 1] .* 1.f2;
     w_b = p[1:nr] .* slope;
     w_b = clamp.(w_b, 0, 50);
-    w_out = reshape(p[nr + 1:nr * (ns + 1)], ns, nr);
 
-    i = 1
-    for j in 1:ns - 2
-        w_out[j, i] = -1.0
-        i = i + 1
-    end
+    w_in = reshape(p[nr + 1:nr * (ns + 1)], ns, nr);
+    w_out = reshape(p[nr * (ns + 1) + 1:nr * (ns * 2 + 1)], ns, nr);
+
+    # i = 1
+    # for j in 1:ns - 2
+    #     w_out[j, i] = -1.0
+    #     i = i + 1
+    # end
     @. w_out[1, :] = clamp(w_out[1, :], -3, 0)
     @. w_out[end, :] = clamp(abs(w_out[end, :]), 0, 3)
 
     w_out[ns - 1:ns - 1, :] .= -sum(w_out[1:ns - 2, :], dims=1) .- sum(w_out[ns:ns, :], dims=1)
 
-    w_in_Ea = abs.(p[nr * (ns + 1) + 1:nr * (ns + 2)] .* slope .* 10.f0)
-    w_in_Ea = clamp.(w_in_Ea, 0.f0, 300.f0)
+    w_in_Ea = abs.(p[nr * (ns * 2 + 1) + 1:nr * (ns * 2 + 2)] .* slope .* 10.f0);
+    w_in_Ea = clamp.(w_in_Ea, 0.f0, 300.f0);
 
-    w_in_b = abs.(p[nr * (ns + 2) + 1:nr * (ns + 3)])
+    w_in_ocen = abs.(p[nr * (ns * 2 + 2) + 1:nr * (ns * 2 + 3)]);
+    w_in_ocen = clamp.(w_in_ocen, 0.f0, 1.5);
+    # w_in_ocen[1:end] .= 0;
 
-    w_in_ocen = abs.(p[nr * (ns + 3) + 1:nr * (ns + 4)])
-    w_in_ocen = clamp.(w_in_ocen, 0.f0, 1.5)
-    w_in_ocen[1:ns - 1] .= 0
-
-    w_in = vcat(clamp.(-w_out, 0.f0, 4.f0), w_in_Ea', w_in_b', w_in_ocen')
+    w_in = clamp.(-w_out, 0.f0, 4.f0) .* abs.(w_in);
+    w_in = vcat(w_in, w_in_Ea', w_in_ocen');
+    
     return w_in, w_b, w_out
 end
 
 function display_p(p)
     w_in, w_b, w_out = p2vec(p);
-    println("\nspecies (column) reaction (row)")
-    println("w_in | Ea | beta | n_ocen | lnA | w_out")
-    show(stdout, "text/plain", round.(hcat(w_in', w_b, w_out'), digits=2))
-    # println("\nw_out")
-    # show(stdout, "text/plain", round.(w_out', digits=3))
-    println("\n")
+    println("species (column) reaction (row)")
+    println("w_in")
+    show(stdout, "text/plain", round.(w_in', digits=3))
+
+    println("\nw_b")
+    show(stdout, "text/plain", round.(w_b', digits=3))
+
+    println("\nw_out")
+    show(stdout, "text/plain", round.(w_out', digits=3))
+    println("\n\n")
 end
-display_p(p);
+# display_p(p);
+
+R = -1.f0 / 8.314f-3  # universal gas constant, kJ/mol*K
 
 function getsampletemp(t, T0, beta)
     if beta < 100
@@ -141,11 +154,10 @@ function getsampletemp(t, T0, beta)
     return T
 end
 
-R = -1.f0 / 8.314f-3  # universal gas constant, kJ/mol*K
 function crnn!(du, u, p, t)
     logX = @. log(clamp(u, llb, ub));
     T = getsampletemp(t, T0, beta)
-    w_in_x = w_in' * vcat(logX, R / T, log(T), ocen);
+    w_in_x = w_in' * vcat(logX, R / T, ocen);
     du .= w_out * (@. exp(w_in_x + w_b));
 end
 
@@ -164,14 +176,16 @@ function cost_singleexp(prob, exp_data)
     pred = Array(sol)
     masslist = sum(clamp.(@views(pred[1:end - 1, :]), 0, Inf), dims=1)';
     gaslist = clamp.(@views(pred[end, :]), 0, Inf);
+
     loss = mae(masslist, @views(exp_data[1:length(masslist), 3]))
     if ocen < 1000
         loss += mae(gaslist, 1 .- @views(exp_data[1:length(masslist), 3]))
     end
+
     if sol.retcode == :Success
         nothing
     else
-        @sprintf("solver failed beta: %.0f ocen: %.2f", beta, exp(ocen))
+        println("ode solver failed")
     end
     return loss
 end
@@ -276,12 +290,12 @@ end
 if is_restart
     @load "./checkpoint/mymodel.bson" p opt l_loss_train l_loss_val list_grad iter
     iter += 1
-    # opt = ADAMW(1.e-6, (0.9, 0.999), 1.f-8);
+    # opt = ADAMW(0.005, (0.9, 0.999), 1.f-5);
 end
 
 epochs = ProgressBar(iter:n_epoch);
-loss_epoch = zeros(Float64, n_exp);
-grad_norm = zeros(Float64, n_exp);
+loss_epoch = zeros(Float32, n_exp);
+grad_norm = zeros(Float32, n_exp);
 
 for epoch in epochs
     global p
@@ -303,12 +317,12 @@ for epoch in epochs
     loss_val = mean(loss_epoch[l_val])
     grad_mean = mean(grad_norm[l_train])
     set_description(epochs, 
-                    string(@sprintf("Loss train: %.2e val: %.2e grad: %.2e lr: %.1e", 
-                            loss_train, loss_val, grad_mean, opt[1].eta)))
+                    string(@sprintf("Loss train: %.4e val: %.4e grad: %.2e", 
+                            loss_train, loss_val, grad_mean)))
     cb(p, loss_train, loss_val, grad_mean)
 end
 
-@sprintf("Min Loss train: %.2e val: %.2e", minimum(l_loss_train), minimum(l_loss_val))
+@sprintf("Min Loss train: %.4e val: %.4e", minimum(l_loss_train), minimum(l_loss_val))
 
 for i_exp in randperm(n_exp)
     cbi(p, i_exp)

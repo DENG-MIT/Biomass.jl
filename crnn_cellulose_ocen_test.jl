@@ -10,20 +10,22 @@ using Flux.Losses: mae, mse
 using BSON: @save, @load
 using DelimitedFiles
 
-is_restart = false
-n_epoch = 5000;
+is_restart = true
+n_epoch = 100000;
 n_plot = 10;
-opt = Flux.Optimiser(ExpDecay(5e-3, 0.2, 500 * 10, 1e-8), ADAMW(0.005, (0.9, 0.999), 1.f-8));
-grad_max = 1.f1;
-maxiters = 10000;
+opt = Flux.Optimiser(ExpDecay(5e-3, 0.2, 300 * 10, 1e-6), ADAMW(0.005, (0.9, 0.999), 1.f-8));
+grad_max = 1.f2;
+maxiters = 5000;
+
+p_cutoff = 0.1
 
 ns = 5;
-nr = 10;
+nr = 6;
 
 lb = 1.e-6;
-llb = 1.e-6;
+llb = 1e-6;
 rb = 1e-3;
-ub = 1.e1;
+ub = 1.e2;
 
 u0 = zeros(ns);
 u0[1] = 1.0
@@ -32,17 +34,7 @@ l_exp = 1:14
 n_exp = length(l_exp)
 i_exp = 1;
 
-l_train = []
-l_val = []
-for i in 1:n_exp
-    j = l_exp[i]
-    if !(j in [2, 6, 9, 12])
-        push!(l_train, i)
-    else
-        push!(l_val, i)
-    end
-end
-
+# ode_solver = AutoTsit5(KenCarp4(autodiff=false));
 ode_solver = AutoTsit5(Rosenbrock23(autodiff=false));
 
 function load_exp(filename)
@@ -57,17 +49,17 @@ l_exp_data = [];
 l_exp_info = zeros(Float64, length(l_exp), 3);
 for (i_exp, value) in enumerate(l_exp)
     filename = string("exp_data/expdata_no", string(value), ".txt");
-    exp_data = Float64.(load_exp(filename));
+    exp_data = load_exp(filename);
 
-    if value == 4
-        exp_data = exp_data[1:60, :]
-    elseif value == 5
-        exp_data = exp_data[1:58, :]
-    elseif value == 6
-        exp_data = exp_data[1:60, :]
-    elseif value == 7
-        exp_data = exp_data[1:71, :]
-    end
+    # if value == 4
+    #     exp_data = exp_data[1:60, :]
+    # elseif value == 5
+    #     exp_data = exp_data[1:58, :]
+    # elseif value == 6
+    #     exp_data = exp_data[1:60, :]
+    # elseif value == 7
+    #     exp_data = exp_data[1:71, :]
+    # end
 
     push!(l_exp_data, exp_data);
     T0 = exp_data[1, 2];  # initial temperature, K
@@ -97,6 +89,9 @@ function p2vec(p)
     @. w_out[1, :] = clamp(w_out[1, :], -3, 0)
     @. w_out[end, :] = clamp(abs(w_out[end, :]), 0, 3)
 
+    index = findall(abs.(w_out) .< p_cutoff);
+    w_out[index] .= 0;
+
     w_out[ns - 1:ns - 1, :] .= -sum(w_out[1:ns - 2, :], dims=1) .- sum(w_out[ns:ns, :], dims=1)
 
     w_in_Ea = abs.(p[nr * (ns + 1) + 1:nr * (ns + 2)] .* slope .* 10.f0)
@@ -121,7 +116,7 @@ function display_p(p)
     # show(stdout, "text/plain", round.(w_out', digits=3))
     println("\n")
 end
-display_p(p);
+display_p(p)
 
 function getsampletemp(t, T0, beta)
     if beta < 100
@@ -157,21 +152,18 @@ function makeprob(i_exp, p)
     return prob, tlist
 end
 
-sense = BacksolveAdjoint(checkpointing=true; autojacvec=ZygoteVJP());
+sense = BacksolveAdjoint(checkpointing=true);
 function cost_singleexp(prob, exp_data)
     sol = solve(prob, alg=ode_solver, saveat=@views(exp_data[:, 1]), 
                 sensalg=sense, verbose=false, maxiters=maxiters);
     pred = Array(sol)
+
     masslist = sum(clamp.(@views(pred[1:end - 1, :]), 0, Inf), dims=1)';
     gaslist = clamp.(@views(pred[end, :]), 0, Inf);
+
     loss = mae(masslist, @views(exp_data[1:length(masslist), 3]))
     if ocen < 1000
         loss += mae(gaslist, 1 .- @views(exp_data[1:length(masslist), 3]))
-    end
-    if sol.retcode == :Success
-        nothing
-    else
-        @sprintf("solver failed beta: %.0f ocen: %.2f", beta, exp(ocen))
     end
     return loss
 end
@@ -195,7 +187,7 @@ function plot_sol(sol, exp_data, Tlist, cap, sol0=nothing)
     plt = plot(exp_data[:, 1] / 60, exp_data[:, 3], 
                seriestype=:scatter, label="Exp");
     
-    plot!(plt, ts, sum(clamp.(sol[1:end - 1, :], 0, ub), dims=1)', lw=2, 
+    plot!(plt, ts, sum(sol[1:end - 1, :], dims=1)', lw=2, 
           legend=:left, label="Model");
 
     if sol0 !== nothing
@@ -257,15 +249,16 @@ cb = function (p, loss_train, loss_val, g_norm)
             cbi(p, i_exp)
         end
 
-        plt_loss = plot(l_loss_train, xscale=:identity, yscale=:log10, label="train")
-        plot!(plt_loss, l_loss_val, xscale=:identity, yscale=:log10, label="val")
-        plt_grad = plot(list_grad, xscale=:identity, yscale=:log10, label="grad_norm")
+        plt_loss = plot(l_loss_train, xscale=:identity, yscale=:log10, label="train", legend=:best)
+        plot!(plt_loss, l_loss_val, xscale=:identity, yscale=:log10, label="validation")
+        plt_grad = plot(list_grad, xscale=:identity, yscale=:log10, legend=false)
         xlabel!(plt_loss, "Epoch")
         xlabel!(plt_grad, "Epoch")
         ylabel!(plt_loss, "Loss")
-        ylabel!(plt_grad, "Grad Norm")
+        ylabel!(plt_grad, "Gradient Norm")
         ylims!(plt_loss, (-Inf, 1e0))
-        plt_all = plot([plt_loss, plt_grad]..., legend=:top)
+        ylims!(plt_grad, (-Inf, 1e3))
+        plt_all = plot([plt_loss, plt_grad]..., framestyle=:box, size=(800, 350))
         png(plt_all, "figs/loss_grad")
 
         @save "./checkpoint/mymodel.bson" p opt l_loss_train l_loss_val list_grad iter
@@ -276,40 +269,91 @@ end
 if is_restart
     @load "./checkpoint/mymodel.bson" p opt l_loss_train l_loss_val list_grad iter
     iter += 1
-    # opt = ADAMW(1.e-6, (0.9, 0.999), 1.f-8);
+    # opt = ADAMW(0.0001, (0.9, 0.999), 1.f-6);
 end
 
-epochs = ProgressBar(iter:n_epoch);
+display_p(p);
 loss_epoch = zeros(Float64, n_exp);
-grad_norm = zeros(Float64, n_exp);
+for i_exp in 1:n_exp
+    loss_epoch[i_exp] = loss_neuralode(p, i_exp)
+end
+loss_mean = mean(loss_epoch);
+@sprintf("cutoff %.2f Loss: %.4e", p_cutoff, loss_mean)
 
-for epoch in epochs
-    global p
-    for i_exp in randperm(n_exp)
-        if i_exp in l_val
-            continue
-        end
-        grad = ForwardDiff.gradient(x -> loss_neuralode(x, i_exp), p);
-        grad_norm[i_exp] = norm(grad, 2)
-        if grad_norm[i_exp] > grad_max
-            grad = grad ./ grad_norm[i_exp] .* grad_max
-        end
-        update!(opt, p, grad)
+w_in, w_b, w_out = p2vec(p);
+pw = vcat(w_in, w_b', w_out)'
+using DelimitedFiles
+writedlm( "weights.csv",  pw, ',')
+
+
+# Plot TGA data
+varnames = ["Cellu", "S2", "S3", "S4", "S5", "Vola"]
+for i_exp in [9, 11, 12]
+    global T0, beta, ocen = l_exp_info[i_exp, :];
+    global w_in, w_b, w_out = p2vec(p);
+    prob, tlist = makeprob(i_exp, p);
+    sol = solve(prob, alg=ode_solver, reltol=1e-3, abstol=1e-6, saveat=tlist);
+    Tlist = copy(sol.t)
+    for (i, t) in enumerate(sol.t)
+        Tlist[i] = getsampletemp(t, T0, beta)
     end
-    for i_exp in 1:n_exp
-        loss_epoch[i_exp] = loss_neuralode(p, i_exp)
+    value = l_exp[i_exp]
+    exp_data = l_exp_data[i_exp]
+    plt = plot(Tlist, exp_data[:, 3], seriestype=:scatter, label="Exp", framestyle=:box);
+    plot!(plt, Tlist, sum(sol[1:end - 1, :], dims=1)', lw=2, legend=:best, label="Model");
+    xlabel!(plt, "Temperature [K]");
+    ylabel!(plt, "Mass [-]");
+    plot!(plt, xtickfontsize=11, ytickfontsize=11, xguidefontsize=12, yguidefontsize=12)
+    plot!(plt, size=(400, 400), legend=false)
+    # if i_exp == 11
+    #     plot!(plt, size=(900, 300), legend=false)
+    # else
+    #     plot!(plt, size=(400, 400), legend=false)
+    # end
+    png(plt, string("figs/pred_exp_", value))
+
+    list_plt = []
+    for i in 1:ns
+        plt = plot(Tlist, clamp.(sol[i, :], 0, Inf), 
+                    framestyle=:box, xtickfontsize=11, ytickfontsize=11, xguidefontsize=12, yguidefontsize=12)
+        xlabel!(plt, "Temperature [K]");
+        ylabel!(plt, "[$(varnames[i])]");
+        push!(list_plt, plt)
     end
-    loss_train = mean(loss_epoch[l_train])
-    loss_val = mean(loss_epoch[l_val])
-    grad_mean = mean(grad_norm[l_train])
-    set_description(epochs, 
-                    string(@sprintf("Loss train: %.2e val: %.2e grad: %.2e lr: %.1e", 
-                            loss_train, loss_val, grad_mean, opt[1].eta)))
-    cb(p, loss_train, loss_val, grad_mean)
+    plt_all = plot(list_plt...)
+    plot!(plt_all, size=(1200, 800), legend=false)
+    png(plt_all, string("figs/pred_S_exp_", value))
 end
 
-@sprintf("Min Loss train: %.2e val: %.2e", minimum(l_loss_train), minimum(l_loss_val))
 
-for i_exp in randperm(n_exp)
-    cbi(p, i_exp)
+# Plot TGA data
+list_plt = []
+for i_exp in 1:14
+    global T0, beta, ocen = l_exp_info[i_exp, :];
+    global w_in, w_b, w_out = p2vec(p);
+    prob, tlist = makeprob(i_exp, p);
+    sol = solve(prob, alg=ode_solver, reltol=1e-3, abstol=1e-6, saveat=tlist);
+    Tlist = copy(sol.t)
+    for (i, t) in enumerate(sol.t)
+        Tlist[i] = getsampletemp(t, T0, beta)
+    end
+    exp_data = l_exp_data[i_exp]
+
+    if beta < 100
+        plt = plot(Tlist, exp_data[:, 3], seriestype=:scatter, label="Exp-$i_exp", framestyle=:box);
+        plot!(plt, Tlist, sum(sol[1:end - 1, :], dims=1)', lw=2, legend=false);
+        xlabel!(plt, "Temperature [K]");
+        
+    else
+        plt = plot(sol.t / 60, exp_data[:, 3], seriestype=:scatter, label="Exp-$i_exp", framestyle=:box);
+        plot!(plt, sol.t / 60, sum(sol[1:end - 1, :], dims=1)', lw=2, legend=false);
+        xlabel!(plt, "Time [min]");
+    end
+    ylabel!(plt, "Mass [-] (No. $i_exp)");
+    plot!(plt, xtickfontsize=11, ytickfontsize=11, xguidefontsize=12, yguidefontsize=12)
+    
+    push!(list_plt, plt)
 end
+plt_all = plot(list_plt..., layout=(7, 2))
+plot!(plt_all, size=(800, 1200))
+png(plt_all, string("figs/mass_summary"))
