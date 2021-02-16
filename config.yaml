@@ -1,1 +1,16 @@
-5s5r-01
+expr_name: 5s5r-01
+is_restart: true
+ns: 5
+nr: 5
+
+lb: 1.e-8
+n_epoch: 5000
+n_plot: 10
+grad_max: 1.e2
+maxiters: 5000
+
+lr_max: 0.005
+lr_min: 1.e-4
+lr_decay: 0.2
+lr_decay_step: 500
+w_decay: 1.e-8

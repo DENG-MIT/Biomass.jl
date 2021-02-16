@@ -24,8 +24,7 @@ for (i_exp, value) in enumerate(l_exp)
     end
 
     push!(l_exp_data, exp_data)
-    T0 = exp_data[1, 2]  # initial temperature, K
-    l_exp_info[i_exp, 1] = T0
+    l_exp_info[i_exp, 1] = exp_data[1, 2] # initial temperature, K
 end
 l_exp_info[:, 2] = readdlm("exp_data/beta.txt")[l_exp];
 l_exp_info[:, 3] = log.(readdlm("exp_data/ocen.txt")[l_exp] .+ llb);

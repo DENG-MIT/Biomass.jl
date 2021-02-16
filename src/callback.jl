@@ -6,7 +6,7 @@ function plot_sol(i_exp, sol, exp_data, Tlist, cap, sol0=nothing)
     plt = plot(exp_data[:, 1] / 60.0, exp_data[:, 3],
                seriestype=:scatter, label="Exp");
 
-    plot!(plt, ts, sum(clamp.(sol[1:end - 1, :], 0, ub), dims=1)', lw=3,
+    plot!(plt, ts, sum(clamp.(sol[1:end - 1, :], 0, Inf), dims=1)', lw=3,
           legend=:left, label="CRNN");
 
     if sol0 !== nothing
@@ -47,10 +47,9 @@ cbi = function (p, i_exp)
     end
     value = l_exp[i_exp]
     plt = plot_sol( i_exp, sol, exp_data, Tlist, "exp_$value")
-    png(plt, string("figs/pred_exp_", value))
+    png(plt, string(fig_path, "/conditions/pred_exp_$value"))
     return false
 end
-cbi(p, 14)
 
 l_loss_train = []
 l_loss_val = []
@@ -65,7 +64,11 @@ cb = function (p, loss_train, loss_val, g_norm)
     if iter % n_plot == 0
         display_p(p)
         list_exp = randperm(n_exp)[1]
-        println("min loss ", minimum(l_loss_train))
+        @sprintf(
+            "Min Loss train: %.2e val: %.2e",
+            minimum(l_loss_train),
+            minimum(l_loss_val)
+        )
         println("update plot ", l_exp[list_exp])
         for i_exp in list_exp
             cbi(p, i_exp)
@@ -80,15 +83,14 @@ cb = function (p, loss_train, loss_val, g_norm)
         ylabel!(plt_grad, "Gradient Norm")
         ylims!(plt_loss, (-Inf, 1e0))
         plt_all = plot([plt_loss, plt_grad]..., legend=:top)
-        png(plt_all, "figs/loss_grad")
+        png(plt_all, string(fig_path, "/loss_grad"))
 
-        @save "./checkpoint/mymodel.bson" p opt l_loss_train l_loss_val list_grad iter
+        @save string(ckpt_path, "/mymodel.bson") p opt l_loss_train l_loss_val list_grad iter
     end
     iter += 1
 end
 
 if is_restart
-    @load "./checkpoint/mymodel.bson" p opt l_loss_train l_loss_val list_grad iter
+    @load string(ckpt_path, "/mymodel.bson") p opt l_loss_train l_loss_val list_grad iter
     iter += 1
-    # opt = ADAMW(1.e-6, (0.9, 0.999), 1.e-8);
 end

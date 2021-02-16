@@ -11,11 +11,11 @@ function p2vec(p)
     w_b = clamp.(w_b, 0, 50)
 
     w_out = reshape(p[nr+1:nr*(ns+1)], ns, nr)
-    i = 1
-    for j = 1:ns-2
-        w_out[j, i] = -1.0
-        i = i + 1
-    end
+    # i = 1
+    # for j = 1:ns-2
+    #     w_out[j, i] = -1.0
+    #     i = i + 1
+    # end
     @. w_out[1, :] = clamp(w_out[1, :], -3, 0)
     @. w_out[end, :] = clamp(abs(w_out[end, :]), 0, 3)
     w_out[ns-1:ns-1, :] .=
@@ -72,6 +72,8 @@ const R = -1.0 / 8.314e-3  # universal gas constant, kJ/mol*K
 end
 
 tspan = [0.0, 1.0];
+u0 = zeros(ns);
+u0[1] = 1.0;
 prob = ODEProblem(crnn!, u0, tspan, p, abstol = lb)
 
 alg = AutoTsit5(TRBDF2(autodiff = true));
@@ -111,7 +113,7 @@ function loss_neuralode(p, i_exp)
     end
     return loss
 end
-loss = loss_neuralode(p, 1)
+@time loss = loss_neuralode(p, 1)
 # using BenchmarkTools
 # @benchmark loss = loss_neuralode(p, 1)
 # @benchmark grad = ForwardDiff.gradient(x -> loss_neuralode(x, 1), p)
