@@ -64,7 +64,7 @@ cb = function (p, loss_train, loss_val, g_norm)
     if iter % n_plot == 0
         display_p(p)
         list_exp = randperm(n_exp)[1]
-        @sprintf(
+        @printf(
             "Min Loss train: %.2e val: %.2e",
             minimum(l_loss_train),
             minimum(l_loss_val)

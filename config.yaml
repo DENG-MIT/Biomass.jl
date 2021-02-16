@@ -1,7 +1,7 @@
-expr_name: 5s5r-01
-is_restart: false
+expr_name: 5s10r-01
+is_restart: true
 ns: 5
-nr: 5
+nr: 10
 
 lb: 1.e-8
 n_epoch: 2500
