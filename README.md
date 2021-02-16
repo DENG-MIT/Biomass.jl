@@ -1,3 +1,7 @@
 # Biomass.jl
 
-Modeling Biomass Pyrolysis Kinetic using CRNN
+Autonomous Biomass Pyrolysis Kinetic Modeling using Chemical Reaction Neural Network
+
+## Contact
+Weiqi
+Franz

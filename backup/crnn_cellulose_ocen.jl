@@ -1,4 +1,4 @@
-using OrdinaryDiffEq, Flux, Optim, Random, Plots
+using OrdinaryDiffEq, Flux, Random, Plots
 using Zygote
 using ForwardDiff
 using DiffEqSensitivity
