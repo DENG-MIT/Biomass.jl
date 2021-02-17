@@ -11,6 +11,8 @@ using BSON: @save, @load
 using DelimitedFiles
 using YAML
 
+ENV["GKSwstype"] = "100"
+
 cd(dirname(@__DIR__))
 conf = YAML.load_file("./config.yaml")
 
