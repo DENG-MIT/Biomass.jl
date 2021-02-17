@@ -26,4 +26,6 @@ docs/site/
 # environment.
 Manifest.toml
 
+# Project specific
 results
+.vscode

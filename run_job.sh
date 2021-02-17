@@ -1,1 +1,1 @@
-julia -t 4 ./src/crnn_cellulose.jl
+julia ./src/crnn_cellulose.jl
