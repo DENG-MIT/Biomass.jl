@@ -11,24 +11,27 @@ function p2vec(p)
     w_b = clamp.(w_b, 0, 50)
 
     w_out = reshape(p[nr+1:nr*(ns+1)], ns, nr)
-    # i = 1
-    # for j = 1:ns-2
-    #     w_out[j, i] = -1.0
-    #     i = i + 1
-    # end
-    @. w_out[1, :] = clamp(w_out[1, :], -3, 0)
-    @. w_out[end, :] = clamp(abs(w_out[end, :]), 0, 3)
+    @. w_out[1, :] = clamp(w_out[1, :], -3.0, 0.0)
+    @. w_out[end, :] = clamp(abs(w_out[end, :]), 0.0, 3.0)
+
+    if p_cutoff > 0.0
+        w_out[findall(abs.(w_out) .< p_cutoff)] .= 0.0
+    end
+
     w_out[ns-1:ns-1, :] .=
         -sum(w_out[1:ns-2, :], dims = 1) .- sum(w_out[ns:ns, :], dims = 1)
 
     w_in_Ea = abs.(p[nr*(ns+1)+1:nr*(ns+2)] .* (slope * 100.0))
-    w_in_Ea = clamp.(w_in_Ea, 0.e0, 300.0)
+    w_in_Ea = clamp.(w_in_Ea, 0.0, 300.0)
 
     w_in_b = abs.(p[nr*(ns+2)+1:nr*(ns+3)])
 
     w_in_ocen = abs.(p[nr*(ns+3)+1:nr*(ns+4)])
     w_in_ocen = clamp.(w_in_ocen, 0.0, 1.5)
-    # w_in_ocen[1:ns-1] .= 0
+
+    if p_cutoff > 0.0
+        w_in_ocen[findall(abs.(w_in_ocen) .< p_cutoff)] .= 0.0
+    end
 
     w_in = vcat(clamp.(-w_out, 0.0, 4.0), w_in_Ea', w_in_b', w_in_ocen')
     return w_in, w_b, w_out
@@ -43,7 +46,7 @@ function display_p(p)
     # show(stdout, "text/plain", round.(w_out', digits=3))
     println("\n")
 end
-display_p(p);
+# display_p(p);
 
 function getsampletemp(t, T0, beta)
     if beta < 100

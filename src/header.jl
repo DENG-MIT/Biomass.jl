@@ -37,6 +37,7 @@ lr_decay_step = Int64(conf["lr_decay_step"])
 w_decay = Float64(conf["w_decay"])
 
 llb = lb;
+global p_cutoff = -1.0
 
 const l_exp = 1:14
 n_exp = length(l_exp)
