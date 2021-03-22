@@ -86,8 +86,8 @@ function plot_loss(l_loss_train, l_loss_val; yscale = :log10)
     ylabel!(plt_loss, "Loss")
     xlabel!(plt_grad, "Epoch")
     ylabel!(plt_grad, "Gradient Norm")
-    ylims!(plt_loss, (-Inf, 1e0))
-    ylims!(plt_grad, (-Inf, 1e3))
+    # ylims!(plt_loss, (-Inf, 1e0))
+    # ylims!(plt_grad, (-Inf, 1e3))
     plt_all = plot([plt_loss, plt_grad]..., legend = :top, framestyle=:box)
     plot!(
         plt_all,
@@ -118,7 +118,7 @@ cb = function (p, loss_train, loss_val, g_norm)
             minimum(l_loss_train),
             minimum(l_loss_val)
         )
-        println("update plot ", l_exp[list_exp])
+        println("\n update plot ", l_exp[list_exp], "\n")
         for i_exp in list_exp
             cbi(p, i_exp)
         end
