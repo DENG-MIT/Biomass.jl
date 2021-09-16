@@ -79,6 +79,10 @@ u0 = zeros(ns);
 u0[1] = 1.0;
 prob = ODEProblem(crnn!, u0, tspan, p, abstol = lb)
 
+condition(u, t, integrator) = u[1] < lb * 10.0
+affect!(integrator) = terminate!(integrator)
+_cb = DiscreteCallback(condition, affect!)
+
 alg = AutoTsit5(TRBDF2(autodiff = true));
 # sense = BacksolveAdjoint(checkpointing=true; autojacvec=ZygoteVJP());
 sense = ForwardSensitivity(autojacvec = true)
@@ -92,9 +96,10 @@ function pred_n_ode(p, i_exp, exp_data)
         alg,
         tspan = tspan,
         p = p,
-        saveat = @view(exp_data[:, 1]),
+        saveat = ts,
         sensalg = sense,
         maxiters = maxiters,
+        # callback = _cb,
     )
 
     if sol.retcode == :Success
@@ -102,7 +107,13 @@ function pred_n_ode(p, i_exp, exp_data)
     else
         @sprintf("solver failed beta: %.0f ocen: %.2f", beta, exp(ocen))
     end
-    return sol
+    if length(sol.t) > length(ts)
+        # @show exp_data[:, 1]
+        # @show sol.t
+        return  sol[:, 1:length(ts)]
+    else
+        return sol
+    end
 end
 
 function loss_neuralode(p, i_exp)
@@ -110,6 +121,7 @@ function loss_neuralode(p, i_exp)
     pred = Array(pred_n_ode(p, i_exp, exp_data))
     masslist = sum(clamp.(@view(pred[1:end-1, :]), 0, Inf), dims = 1)'
     gaslist = clamp.(@views(pred[end, :]), 0, Inf)
+
     loss = mae(masslist, @view(exp_data[1:length(masslist), 3]))
     if ocen < 1000.0
         loss += mae(gaslist, 1 .- @view(exp_data[1:length(masslist), 3]))

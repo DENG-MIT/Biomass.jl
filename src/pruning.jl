@@ -3,8 +3,19 @@ include("dataset.jl")
 include("network.jl")
 include("callback.jl")
 
-pyplot()
+# pyplot()
 plot_loss(l_loss_train, l_loss_val; yscale = :log10)
+
+function loss_neuralode_res(p)
+    l_loss_exp = zeros(n_exp)
+    for i_exp in 1:n_exp
+        exp_data = l_exp_data[i_exp]
+        pred = Array(pred_n_ode(p, i_exp, exp_data))
+        masslist = sum(clamp.(@view(pred[1:end-1, :]), 0, Inf), dims = 1)'
+        l_loss_exp[i_exp] = mae(masslist, @view(exp_data[1:length(masslist), 3]))
+    end
+    return l_loss_exp
+end
 
 println("results after pruning")
 maxiters = 1e5
@@ -27,6 +38,8 @@ for i_exp in randperm(n_exp)
     cbi(p, i_exp)
 end
 
+l_loss_exp = loss_neuralode_res(p)
+
 l_exp_data = []
 l_exp_info = zeros(Float64, length(l_exp), 3)
 for (i_exp, value) in enumerate(l_exp)
@@ -37,6 +50,10 @@ for (i_exp, value) in enumerate(l_exp)
 end
 l_exp_info[:, 2] = readdlm("exp_data/beta.txt")[l_exp]
 l_exp_info[:, 3] = log.(readdlm("exp_data/ocen.txt")[l_exp] .+ llb)
+
+l_loss_exp = loss_neuralode_res(p)
+
+conc_end = zeros(n_exp, ns)
 
 # Plot TGA data
 list_plt = []
@@ -49,6 +66,8 @@ for i_exp = 1:14
     for (i, t) in enumerate(sol.t)
         Tlist[i] = getsampletemp(t, T0, beta)
     end
+
+    conc_end[i_exp, :] .= sol[:, end]
 
     if beta < 100
         plt = plot(
@@ -120,7 +139,7 @@ png(plt_all, string(fig_path, "/TGA_mass_summary"))
 
 # https://github.com/DENG-MIT/Biomass.jl/blob/main/backup/crnn_cellulose_ocen_test.jl
 varnames = ["Cellu", "S2", "S3", "Vola"]
-for i_exp in [12]
+for i_exp in 1:n_exp
     T0, beta, ocen = l_exp_info[i_exp, :]
     exp_data = l_exp_data[i_exp]
     sol = pred_n_ode(p, i_exp, exp_data)
@@ -131,12 +150,12 @@ for i_exp in [12]
     end
     value = l_exp[i_exp]
     list_plt = []
-    scale_factor = ones(ns)
-    scale_factor[3] = 1000.0
+    scale_factor = 1 ./ maximum(sol[:, :], dims=2)
+    scale_factor .= 1.0
     plt = plot(Tlist, clamp.(sol[1, :], 0, Inf), label = varnames[1])
     for i in 2:ns
         if scale_factor[i] > 1.1
-            _label = varnames[i] * " x $(scale_factor[i])"
+            _label =  @sprintf("%s x %.2e", varnames[i], scale_factor[i])
         else
             _label = varnames[i]
         end
@@ -144,7 +163,7 @@ for i_exp in [12]
     end
     xlabel!(plt, "Temperature [K]");
     ylabel!(plt, "Mass (-)");
-    plot!(plt, size=(350, 350), legend=true, framestyle=:box)
+    plot!(plt, size=(350, 350), legend=:topleft, framestyle=:box)
     plot!(
         plt,
         xtickfontsize = 11,

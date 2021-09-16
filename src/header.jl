@@ -6,7 +6,7 @@ using Statistics
 using ProgressBars, Printf
 using Flux
 using Flux.Optimise: update!
-using Flux.Losses: mae
+using Flux.Losses: mae, mse
 using BSON: @save, @load
 using DelimitedFiles
 using YAML

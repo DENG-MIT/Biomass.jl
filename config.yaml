@@ -7,7 +7,7 @@ lb: 1.e-8
 n_epoch: 2500
 n_plot: 10
 grad_max: 1.e2
-maxiters: 5000
+maxiters: 50000
 
 lr_max: 5.e-3
 lr_min: 1.e-5
