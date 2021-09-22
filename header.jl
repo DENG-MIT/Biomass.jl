@@ -13,7 +13,7 @@ using YAML
 
 ENV["GKSwstype"] = "100"
 
-cd(dirname(@__DIR__))
+# cd(dirname(@__DIR__))
 conf = YAML.load_file("./config.yaml")
 
 expr_name = conf["expr_name"]

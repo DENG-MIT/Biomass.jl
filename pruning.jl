@@ -137,6 +137,7 @@ plt_all = plot(list_plt..., layout = (7, 2))
 plot!(plt_all, size = (800, 1200))
 png(plt_all, string(fig_path, "/TGA_mass_summary"))
 
+
 # https://github.com/DENG-MIT/Biomass.jl/blob/main/backup/crnn_cellulose_ocen_test.jl
 varnames = ["Cellu", "S2", "S3", "Vola"]
 for i_exp in 1:n_exp
