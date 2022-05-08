@@ -8,4 +8,4 @@ Modeling the burning processes of biomass such as wood, grass, and crops is cruc
 
 ## Related publication
 
-Ji, Weiqi, Franz Richter, Michael J. Gollner, and Sili Deng. "Autonomous kinetic modeling of biomass pyrolysis using chemical reaction neural networks." Combustion and Flame 240 (2022): 111992.
+[Ji, Weiqi, Franz Richter, Michael J. Gollner, and Sili Deng. "Autonomous kinetic modeling of biomass pyrolysis using chemical reaction neural networks." Combustion and Flame 240 (2022): 111992.](https://www.sciencedirect.com/science/article/pii/S0010218022000116?casa_token=q0ymGLYkbZsAAAAA:EmQhmxa08hPx1JfBOEZon1rYWokq7mxlj-xulDH_AcuxeCh4NToFQvALWDbZW7o0cUGABtM)
